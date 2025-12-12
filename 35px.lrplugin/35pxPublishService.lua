@@ -237,8 +237,9 @@ function publishServiceProvider.createPublishedCollection(publishSettings, info)
   local album, err = API.createAlbum(info.name, "", "private")
   
   if err then
-    LrDialogs.message("35px Error", "Failed to create album: " .. tostring(err))
-    LrErrors.throwUserError("Failed to create album on 35px: " .. tostring(err))
+    local fullError = "Failed to create album: " .. tostring(err)
+    LrDialogs.message("35px Error", fullError, "critical")
+    LrErrors.throwUserError(fullError)
   end
   
   if not album then

@@ -65,13 +65,17 @@ local function handleResponse(body, headers)
     return nil, "No response from server"
   end
   
+  log("Response body: " .. tostring(body))
+  
   local success, result = pcall(function()
     return JSON.decode(body)
   end)
   
   if not success then
     log("Failed to parse JSON response: " .. body)
-    return nil, "Invalid response from server"
+    -- Return the raw body for debugging
+    local preview = string.sub(body, 1, 200)
+    return nil, "Invalid response from server: " .. preview
   end
   
   return result, nil
