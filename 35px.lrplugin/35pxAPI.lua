@@ -18,7 +18,7 @@ local JSON = require '35pxJSON'
 local API = {}
 
 -- Configuration
-API.debugMode = false
+API.debugMode = true  -- Enable for debugging
 API.baseUrl = "https://35px.com"
 API.apiVersion = "v1"
 
@@ -34,6 +34,17 @@ local function log(message)
     local timestamp = LrDate.timeToUserFormat(LrDate.currentTime(), "%Y-%m-%d %H:%M:%S")
     print(string.format("[35px %s] %s", timestamp, message))
   end
+end
+
+-- Helper to get table keys for debugging
+local function getKeys(t)
+  local keys = {}
+  if type(t) == "table" then
+    for k, _ in pairs(t) do
+      table.insert(keys, tostring(k))
+    end
+  end
+  return keys
 end
 
 local function getApiUrl(endpoint)
@@ -177,9 +188,20 @@ function API.createAlbum(title, description, visibility)
     visibility = visibility or "private"
   })
   
-  log(string.format("POST %s", url))
+  log(string.format("POST %s with payload: %s", url, payload))
   
   local body, headers = LrHttp.post(url, payload, makeHeaders())
+  
+  -- Log response headers for debugging
+  if headers then
+    for k, v in pairs(headers) do
+      if type(v) == "table" then
+        log(string.format("Header %s: %s = %s", k, tostring(v.field), tostring(v.value)))
+      else
+        log(string.format("Header %s: %s", k, tostring(v)))
+      end
+    end
+  end
   
   -- Check if request failed completely
   if not body then
@@ -187,24 +209,39 @@ function API.createAlbum(title, description, visibility)
     return nil, "No response from server. Please check your internet connection."
   end
   
+  log(string.format("Response body: %s", string.sub(body, 1, 500)))
+  
   local result, err = handleResponse(body, headers)
   
   if err then
-    log(string.format("Error: %s", err))
+    log(string.format("Parse error: %s", err))
     return nil, err
+  end
+  
+  -- Log the parsed result
+  if result then
+    log(string.format("Parsed result keys: %s", table.concat(getKeys(result), ", ")))
   end
   
   if result and result.album then
     log(string.format("Album created: %s", result.album.id))
     return result.album, nil
   elseif result and result.error then
-    log(string.format("API error: %s", result.error))
-    return nil, result.error .. (result.message and (": " .. result.message) or "")
+    local errorMsg = result.error
+    if result.message then
+      errorMsg = errorMsg .. ": " .. result.message
+    end
+    if result.details then
+      errorMsg = errorMsg .. " (" .. tostring(result.details) .. ")"
+    end
+    log(string.format("API error: %s", errorMsg))
+    return nil, errorMsg
   else
-    log("Unknown response format")
-    return nil, "Unexpected response from server"
+    log("Unknown response format - returning raw body")
+    return nil, "Unexpected response: " .. string.sub(body, 1, 200)
   end
 end
+
 
 --------------------------------------------------------------------------------
 -- Photo Upload
