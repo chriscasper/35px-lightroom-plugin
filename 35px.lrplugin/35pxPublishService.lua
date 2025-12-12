@@ -223,8 +223,12 @@ end
 
 -- Called when user wants to create a new published folder (album)
 function publishServiceProvider.createPublishedCollection(publishSettings, info)
+  -- Debug: Show that we got here
+  LrDialogs.message("35px: Creating Album", "Creating album '" .. (info.name or "unknown") .. "' on 35px...")
+  
   -- Check if we have an API key
   if not publishSettings.apiKey or publishSettings.apiKey == "" then
+    LrDialogs.message("35px Error", "No API key found. Please configure your API key in the publish service settings.")
     LrErrors.throwUserError("Please configure your 35px API key first. Edit the publish service settings to add your API key.")
   end
   
@@ -233,16 +237,22 @@ function publishServiceProvider.createPublishedCollection(publishSettings, info)
   local album, err = API.createAlbum(info.name, "", "private")
   
   if err then
+    LrDialogs.message("35px Error", "Failed to create album: " .. tostring(err))
     LrErrors.throwUserError("Failed to create album on 35px: " .. tostring(err))
   end
   
   if not album then
+    LrDialogs.message("35px Error", "No response from 35px server")
     LrErrors.throwUserError("Failed to create album: No response from 35px server")
   end
   
   if not album.id then
+    LrDialogs.message("35px Error", "Invalid response - no album ID")
     LrErrors.throwUserError("Failed to create album: Invalid response from 35px server")
   end
+  
+  -- Success!
+  LrDialogs.message("35px: Album Created", "Album '" .. (album.title or info.name) .. "' created successfully on 35px!")
   
   -- Use slug if available, otherwise fall back to ID for URL
   local urlSlug = album.slug or album.id
