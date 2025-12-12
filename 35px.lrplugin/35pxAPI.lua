@@ -161,6 +161,11 @@ end
 function API.createAlbum(title, description, visibility)
   log(string.format("Creating album: %s", title))
   
+  -- Check API key
+  if not apiKey or apiKey == "" then
+    return nil, "API key not configured"
+  end
+  
   local url = getApiUrl("/albums")
   local payload = JSON.encode({
     title = title,
@@ -168,19 +173,32 @@ function API.createAlbum(title, description, visibility)
     visibility = visibility or "private"
   })
   
+  log(string.format("POST %s", url))
+  
   local body, headers = LrHttp.post(url, payload, makeHeaders())
+  
+  -- Check if request failed completely
+  if not body then
+    log("No response body received")
+    return nil, "No response from server. Please check your internet connection."
+  end
   
   local result, err = handleResponse(body, headers)
   
   if err then
+    log(string.format("Error: %s", err))
     return nil, err
   end
   
   if result and result.album then
     log(string.format("Album created: %s", result.album.id))
     return result.album, nil
+  elseif result and result.error then
+    log(string.format("API error: %s", result.error))
+    return nil, result.error .. (result.message and (": " .. result.message) or "")
   else
-    return nil, result and result.error or "Failed to create album"
+    log("Unknown response format")
+    return nil, "Unexpected response from server"
   end
 end
 

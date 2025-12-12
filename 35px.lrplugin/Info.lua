@@ -13,45 +13,20 @@ return {
   LrPluginName = "35px",
   LrPluginInfoUrl = "https://35px.com/lightroom",
 
-  -- Publish Service Provider
+  -- Publish Service Provider - must reference the file containing the provider
   LrPublishServiceProvider = {
     title = "35px",
-    supportsIncrementalPublish = 'only',
+    file = '35pxPublishService.lua',
     
     -- Plugin icons
     small_icon = 'icon-small.png',
     large_icon = 'icon-large.png',
-    
-    -- Export/Publish settings
-    exportPresetFields = {
-      { key = 'apiKey', default = '' },
-      { key = 'apiKeyName', default = '' },
-      { key = 'defaultAlbumId', default = '' },
-      { key = 'defaultAlbumName', default = '' },
-      { key = 'includeCaption', default = true },
-      { key = 'jpegQuality', default = 95 },
-      { key = 'resizeMaxDimension', default = 0 }, -- 0 = no resize
-    },
-    
-    -- Service definition module
-    requires = {
-      LrDialogs = true,
-      LrHttp = true,
-      LrPathUtils = true,
-      LrFileUtils = true,
-      LrTasks = true,
-      LrProgressScope = true,
-      LrErrors = true,
-      LrDate = true,
-      LrStringUtils = true,
-    },
   },
 
   -- Export Service Provider (for one-off exports)
   LrExportServiceProvider = {
     title = "35px Album",
     file = '35pxPublishService.lua',
-    builtInPresetsDir = 'presets',
   },
 
   -- Library menu items

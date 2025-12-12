@@ -223,18 +223,34 @@ end
 
 -- Called when user wants to create a new published folder (album)
 function publishServiceProvider.createPublishedCollection(publishSettings, info)
+  -- Check if we have an API key
+  if not publishSettings.apiKey or publishSettings.apiKey == "" then
+    LrErrors.throwUserError("Please configure your 35px API key first. Edit the publish service settings to add your API key.")
+  end
+  
   API.setApiKey(publishSettings.apiKey)
   
   local album, err = API.createAlbum(info.name, "", "private")
   
   if err then
-    LrErrors.throwUserError("Failed to create album: " .. err)
+    LrErrors.throwUserError("Failed to create album on 35px: " .. tostring(err))
   end
+  
+  if not album then
+    LrErrors.throwUserError("Failed to create album: No response from 35px server")
+  end
+  
+  if not album.id then
+    LrErrors.throwUserError("Failed to create album: Invalid response from 35px server")
+  end
+  
+  -- Use slug if available, otherwise fall back to ID for URL
+  local urlSlug = album.slug or album.id
   
   return {
     remoteId = album.id,
-    remoteUrl = "https://35px.com/albums/" .. album.slug,
-    name = album.title,
+    remoteUrl = "https://35px.com/albums/" .. urlSlug,
+    name = album.title or info.name,
   }
 end
 
@@ -262,16 +278,35 @@ function publishServiceProvider.processRenderedPhotos(functionContext, exportCon
   local exportSettings = exportContext.propertyTable
   local publishedCollection = exportContext.publishedCollection
   
+  -- Set up API first
+  API.setApiKey(exportSettings.apiKey)
+  
   -- Get the album ID from the collection
   local collectionInfo = publishedCollection:getCollectionInfoSummary()
   local albumId = collectionInfo.remoteId
   
+  -- If no album ID, create the album on 35px automatically
   if not albumId then
-    LrErrors.throwUserError("This collection is not linked to a 35px album. Please recreate it.")
+    local collectionName = publishedCollection:getName()
+    
+    local album, err = API.createAlbum(collectionName, "", "private")
+    
+    if err then
+      LrErrors.throwUserError("Failed to create album on 35px: " .. err)
+    end
+    
+    if album and album.id then
+      albumId = album.id
+      -- Store the remote ID and URL on the collection
+      local catalog = LrApplication.activeCatalog()
+      catalog:withWriteAccessDo("Update collection remote ID", function()
+        publishedCollection:setRemoteId(album.id)
+        publishedCollection:setRemoteUrl("https://35px.com/albums/" .. (album.slug or album.id))
+      end)
+    else
+      LrErrors.throwUserError("Failed to create album on 35px. Please try again.")
+    end
   end
-  
-  -- Set up API
-  API.setApiKey(exportSettings.apiKey)
   
   -- Get count for progress
   local nPhotos = exportSession:countRenditions()
@@ -386,19 +421,51 @@ end
 --------------------------------------------------------------------------------
 
 function publishServiceProvider.goToPublishedCollection(publishSettings, info)
-  if info.remoteUrl then
-    LrHttp.openUrlInBrowser(info.remoteUrl)
-  else
-    LrHttp.openUrlInBrowser("https://35px.com/albums")
+  -- Try to get the URL from the collection info
+  local url = nil
+  
+  -- First check if we have a stored remoteUrl
+  if info.remoteUrl and info.remoteUrl ~= "" then
+    url = info.remoteUrl
+  -- If we have a remoteId, construct the URL from that
+  elseif info.remoteId and info.remoteId ~= "" then
+    -- remoteId might be the album ID - use it to construct URL
+    url = "https://35px.com/albums/" .. info.remoteId
+  -- If we have publishedCollection, try to get info from it
+  elseif info.publishedCollection then
+    local collectionInfo = info.publishedCollection:getCollectionInfoSummary()
+    if collectionInfo.remoteUrl and collectionInfo.remoteUrl ~= "" then
+      url = collectionInfo.remoteUrl
+    elseif collectionInfo.remoteId and collectionInfo.remoteId ~= "" then
+      url = "https://35px.com/albums/" .. collectionInfo.remoteId
+    end
   end
+  
+  -- Fallback to albums page
+  if not url then
+    url = "https://35px.com/albums"
+  end
+  
+  LrHttp.openUrlInBrowser(url)
 end
 
 function publishServiceProvider.goToPublishedPhoto(publishSettings, info)
-  if info.remoteUrl then
-    LrHttp.openUrlInBrowser(info.remoteUrl)
-  else
-    LrHttp.openUrlInBrowser("https://35px.com/albums")
+  -- Try to get the photo URL
+  local url = nil
+  
+  if info.remoteUrl and info.remoteUrl ~= "" then
+    url = info.remoteUrl
+  elseif info.remoteId and info.remoteId ~= "" then
+    -- remoteId is the photo ID - link to the photo page
+    url = "https://35px.com/photos/" .. info.remoteId
   end
+  
+  -- Fallback to albums page
+  if not url then
+    url = "https://35px.com/albums"
+  end
+  
+  LrHttp.openUrlInBrowser(url)
 end
 
 --------------------------------------------------------------------------------
