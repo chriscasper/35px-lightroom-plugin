@@ -24,17 +24,37 @@ mkdir -p "$OUTPUT_DIR"
 rm -f "$OUTPUT_DIR/$OUTPUT_FILE"
 
 # Create ZIP (excluding any hidden files, .DS_Store, etc.)
-zip -r "$OUTPUT_DIR/$OUTPUT_FILE" "$PLUGIN_FOLDER" "LICENSE" \
+zip -r "$OUTPUT_DIR/$OUTPUT_FILE" \
+    "$PLUGIN_FOLDER" \
+    "LICENSE" \
+    "README.md" \
+    "CHANGELOG.md" \
+    "API.md" \
+    "CONTRIBUTING.md" \
     -x "*.DS_Store" \
     -x "*__MACOSX*" \
-    -x "*.git*"
+    -x "*.git*" \
+    -x "*.log" \
+    -x "*.tmp" \
+    -x "dist/*"
 
 echo ""
 echo "✅ Build complete!"
 echo "   Output: $OUTPUT_DIR/$OUTPUT_FILE"
+echo "   Version: v${VERSION}"
+echo ""
+echo "Package contents:"
+echo "  - ${PLUGIN_FOLDER}/ (plugin)"
+echo "  - README.md (user guide)"
+echo "  - CHANGELOG.md (version history)"
+echo "  - API.md (API reference)"
+echo "  - CONTRIBUTING.md (for contributors)"
+echo "  - LICENSE (MIT)"
 echo ""
 echo "To release:"
-echo "1. Create a GitHub release"
-echo "2. Upload $OUTPUT_DIR/$OUTPUT_FILE"
-echo "3. Update download links in documentation"
+echo "1. Test the plugin in Lightroom"
+echo "2. Create a GitHub release (tag: v${VERSION})"
+echo "3. Upload $OUTPUT_DIR/$OUTPUT_FILE"
+echo "4. Update download links in documentation"
+echo ""
 

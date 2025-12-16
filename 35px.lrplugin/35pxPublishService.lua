@@ -223,9 +223,6 @@ end
 
 -- Called when user wants to create a new published folder (album)
 function publishServiceProvider.createPublishedCollection(publishSettings, info)
-  -- Debug: Show that we got here
-  LrDialogs.message("35px: Creating Album", "Creating album '" .. (info.name or "unknown") .. "' on 35px...")
-  
   -- Check if we have an API key
   if not publishSettings.apiKey or publishSettings.apiKey == "" then
     LrDialogs.message("35px Error", "No API key found. Please configure your API key in the publish service settings.")
@@ -247,19 +244,15 @@ function publishServiceProvider.createPublishedCollection(publishSettings, info)
   end
   
   if not album.id then
-    LrDialogs.message("35px Error", "Invalid response - no album ID")
     LrErrors.throwUserError("Failed to create album: Invalid response from 35px server")
   end
-  
-  -- Success!
-  LrDialogs.message("35px: Album Created", "Album '" .. (album.title or info.name) .. "' created successfully on 35px!")
   
   -- Use slug if available, otherwise fall back to ID for URL
   local urlSlug = album.slug or album.id
   
   return {
     remoteId = album.id,
-    remoteUrl = "https://35px.com/albums/" .. urlSlug,
+    remoteUrl = "https://35px.com/profile/photos/albums/" .. urlSlug,
     name = album.title or info.name,
   }
 end
@@ -299,22 +292,34 @@ function publishServiceProvider.processRenderedPhotos(functionContext, exportCon
   if not albumId then
     local collectionName = publishedCollection:getName()
     
+    if not collectionName or collectionName == "" then
+      LrErrors.throwUserError("Cannot create album: Collection name is empty. Please rename the collection and try again.")
+    end
+    
     local album, err = API.createAlbum(collectionName, "", "private")
     
     if err then
-      LrErrors.throwUserError("Failed to create album on 35px: " .. err)
+      local errorMsg = "Failed to create album on 35px"
+      if err and err ~= "" then
+        errorMsg = errorMsg .. ": " .. tostring(err)
+      else
+        errorMsg = errorMsg .. ". Please check your API key and try again."
+      end
+      LrErrors.throwUserError(errorMsg)
     end
     
     if album and album.id then
       albumId = album.id
       -- Store the remote ID and URL on the collection
       local catalog = LrApplication.activeCatalog()
-      catalog:withWriteAccessDo("Update collection remote ID", function()
+      local success = catalog:withWriteAccessDo("Update collection remote ID", function()
         publishedCollection:setRemoteId(album.id)
-        publishedCollection:setRemoteUrl("https://35px.com/albums/" .. (album.slug or album.id))
+        publishedCollection:setRemoteUrl("https://35px.com/profile/photos/albums/" .. (album.slug or album.id))
       end)
+      
+      -- Note: If withWriteAccessDo fails, we continue anyway since the album was created
     else
-      LrErrors.throwUserError("Failed to create album on 35px. Please try again.")
+      LrErrors.throwUserError("Failed to create album on 35px: The server did not return a valid album. Please check your API key and try again.")
     end
   end
   
@@ -408,11 +413,42 @@ end
 function publishServiceProvider.deletePhotosFromPublishedCollection(publishSettings, arrayOfPhotoIds, deletedCallback)
   API.setApiKey(publishSettings.apiKey)
   
+  local failures = {}
+  
   for _, photoId in ipairs(arrayOfPhotoIds) do
-    -- We have the remote photo ID stored - delete it
-    -- Note: We'd need the album ID too, which we might need to track differently
-    -- For now, just mark as deleted locally
+    -- Delete the photo from 35px via API
+    local success, err = API.deletePhoto(photoId)
+    
+    if not success then
+      -- Track failure but continue with other deletions
+      table.insert(failures, {
+        photoId = photoId,
+        error = err or "Unknown error"
+      })
+      LrDialogs.message("35px Delete Error", 
+        string.format("Failed to delete photo from 35px: %s\n\nThe photo will be removed from Lightroom but may still exist on 35px.com", 
+          err or "Unknown error"), 
+        "warning")
+    end
+    
+    -- Mark as deleted locally regardless of API result
+    -- This ensures the photo is removed from the collection even if the API call failed
     deletedCallback(photoId)
+  end
+  
+  -- Report summary if there were multiple failures
+  if #failures > 1 then
+    local message = string.format("%d photo(s) failed to delete from 35px:", #failures)
+    for i, failure in ipairs(failures) do
+      if i <= 5 then -- Show first 5 errors
+        message = message .. "\n• " .. (failure.error or "Unknown error")
+      end
+    end
+    if #failures > 5 then
+      message = message .. string.format("\n... and %d more", #failures - 5)
+    end
+    message = message .. "\n\nThese photos have been removed from Lightroom but may still exist on 35px.com. You can delete them manually from the website."
+    LrDialogs.message("Some Deletions Failed", message, "warning")
   end
 end
 
@@ -431,48 +467,41 @@ end
 --------------------------------------------------------------------------------
 
 function publishServiceProvider.goToPublishedCollection(publishSettings, info)
-  -- Try to get the URL from the collection info
+  -- Always construct URL from remoteId to ensure correct format
   local url = nil
+  local remoteId = nil
   
-  -- First check if we have a stored remoteUrl
-  if info.remoteUrl and info.remoteUrl ~= "" then
-    url = info.remoteUrl
-  -- If we have a remoteId, construct the URL from that
-  elseif info.remoteId and info.remoteId ~= "" then
-    -- remoteId might be the album ID - use it to construct URL
-    url = "https://35px.com/albums/" .. info.remoteId
-  -- If we have publishedCollection, try to get info from it
+  -- Try to get the remote ID
+  if info.remoteId and info.remoteId ~= "" then
+    remoteId = info.remoteId
   elseif info.publishedCollection then
     local collectionInfo = info.publishedCollection:getCollectionInfoSummary()
-    if collectionInfo.remoteUrl and collectionInfo.remoteUrl ~= "" then
-      url = collectionInfo.remoteUrl
-    elseif collectionInfo.remoteId and collectionInfo.remoteId ~= "" then
-      url = "https://35px.com/albums/" .. collectionInfo.remoteId
+    if collectionInfo.remoteId and collectionInfo.remoteId ~= "" then
+      remoteId = collectionInfo.remoteId
     end
   end
   
-  -- Fallback to albums page
-  if not url then
-    url = "https://35px.com/albums"
+  -- Construct URL from remote ID
+  if remoteId then
+    url = "https://35px.com/profile/photos/albums/" .. remoteId
+  else
+    -- Fallback to albums page
+    url = "https://35px.com/profile/photos/albums"
   end
   
   LrHttp.openUrlInBrowser(url)
 end
 
 function publishServiceProvider.goToPublishedPhoto(publishSettings, info)
-  -- Try to get the photo URL
+  -- Always construct URL from remoteId to ensure correct format
   local url = nil
   
-  if info.remoteUrl and info.remoteUrl ~= "" then
-    url = info.remoteUrl
-  elseif info.remoteId and info.remoteId ~= "" then
+  if info.remoteId and info.remoteId ~= "" then
     -- remoteId is the photo ID - link to the photo page
-    url = "https://35px.com/photos/" .. info.remoteId
-  end
-  
-  -- Fallback to albums page
-  if not url then
-    url = "https://35px.com/albums"
+    url = "https://35px.com/profile/photos/" .. info.remoteId
+  else
+    -- Fallback to albums page
+    url = "https://35px.com/profile/photos/albums"
   end
   
   LrHttp.openUrlInBrowser(url)

@@ -27,6 +27,10 @@ return {
   LrExportServiceProvider = {
     title = "35px Album",
     file = '35pxPublishService.lua',
+    
+    -- Plugin icons
+    small_icon = 'icon-small.png',
+    large_icon = 'icon-large.png',
   },
 
   -- Library menu items
@@ -34,7 +38,6 @@ return {
     {
       title = "Configure 35px API Key...",
       file = "35pxMenuItems.lua",
-      enabledWhen = "anytime",
     },
   },
 

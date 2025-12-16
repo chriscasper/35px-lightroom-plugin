@@ -12,18 +12,23 @@ local LrStringUtils = import 'LrStringUtils'
 local LrDate = import 'LrDate'
 local LrErrors = import 'LrErrors'
 local LrDialogs = import 'LrDialogs'
+local LrLogger = import 'LrLogger'
 
 local JSON = require '35pxJSON'
 
 local API = {}
 
 -- Configuration
-API.debugMode = false
+API.debugMode = false  -- Set to true to enable detailed logging for troubleshooting
 API.baseUrl = "https://35px.com"
 API.apiVersion = "v1"
 
 -- Internal state
 local apiKey = nil
+
+-- Logger instance
+local logger = LrLogger('35pxAPI')
+logger:enable('logfile')
 
 --------------------------------------------------------------------------------
 -- Utility Functions
@@ -32,7 +37,7 @@ local apiKey = nil
 local function log(message)
   if API.debugMode then
     local timestamp = LrDate.timeToUserFormat(LrDate.currentTime(), "%Y-%m-%d %H:%M:%S")
-    print(string.format("[35px %s] %s", timestamp, message))
+    logger:info(string.format("[35px %s] %s", timestamp, message))
   end
 end
 
@@ -65,13 +70,79 @@ local function handleResponse(body, headers)
     return nil, "No response from server"
   end
   
+  -- Check for HTTP status code in headers
+  local statusCode = nil
+  if headers then
+    for _, header in ipairs(headers) do
+      if header.field and string.lower(header.field) == "status" then
+        -- Extract status code from "HTTP/1.1 200 OK" format
+        local statusMatch = string.match(header.value or "", "(%d+)")
+        if statusMatch then
+          statusCode = tonumber(statusMatch)
+        end
+      end
+    end
+  end
+  
   local success, result = pcall(function()
     return JSON.decode(body)
   end)
   
   if not success then
     log("Failed to parse JSON response: " .. body)
+    -- If we have a status code, include it in the error
+    if statusCode then
+      return nil, string.format("Invalid response from server (HTTP %d)", statusCode)
+    end
     return nil, "Invalid response from server"
+  end
+  
+  -- Check for errors in the response (regardless of status code detection)
+  if result and result.error then
+    local errorMsg = result.error
+    if result.message and result.message ~= "" then
+      errorMsg = errorMsg .. ": " .. result.message
+    end
+    
+    -- Provide more helpful error messages for common API errors
+    local lowerError = string.lower(errorMsg)
+    if string.find(lowerError, "unauthorized") or string.find(lowerError, "invalid.*api.*key") or string.find(lowerError, "authentication") then
+      errorMsg = errorMsg .. " Please verify your API key is correct and has not expired."
+    elseif string.find(lowerError, "forbidden") or string.find(lowerError, "permission") or string.find(lowerError, "scope") then
+      errorMsg = errorMsg .. " Your API key may not have the required permissions. Please check your API key settings on 35px.com"
+    elseif string.find(lowerError, "value too long") or string.find(lowerError, "constraint") then
+      errorMsg = "Invalid input. Try using a shorter album name or contact 35px support if the issue persists."
+    end
+    
+    log(string.format("Error in response: %s", errorMsg))
+    return nil, errorMsg
+  end
+  
+  -- Check for error status codes (if we detected one)
+  if statusCode and statusCode >= 400 then
+    local errorMsg = "Request failed"
+    if result and result.message then
+      errorMsg = result.message
+    else
+      -- Provide default messages for common status codes
+      if statusCode == 401 then
+        errorMsg = "Unauthorized - Please check your API key"
+      elseif statusCode == 403 then
+        errorMsg = "Forbidden - Your API key may not have the required permissions"
+      elseif statusCode == 400 then
+        errorMsg = "Bad Request - Invalid input parameters"
+      elseif statusCode == 404 then
+        errorMsg = "Not Found - The requested resource does not exist"
+      elseif statusCode == 429 then
+        errorMsg = "Too Many Requests - Rate limit exceeded. Please try again later"
+      elseif statusCode >= 500 then
+        errorMsg = "Server Error - The 35px server encountered an error"
+      else
+        errorMsg = string.format("Request failed with status %d", statusCode)
+      end
+    end
+    log(string.format("Error status code %d: %s", statusCode, errorMsg))
+    return nil, errorMsg
   end
   
   return result, nil
@@ -166,14 +237,35 @@ function API.createAlbum(title, description, visibility)
     return nil, "API key not configured"
   end
   
+  -- Validate title
+  if not title or title == "" then
+    return nil, "Album title cannot be empty"
+  end
+  
+  -- Validate title length (API docs say max 255, but server has a 10-char constraint issue)
+  -- Truncate to 50 chars as a safety measure until server is fixed
+  local safeTitle = title
+  if #title > 50 then
+    log(string.format("Warning: Album title truncated from %d to 50 characters", #title))
+    safeTitle = string.sub(title, 1, 50)
+  end
+  
+  -- Validate visibility value
+  local safeVisibility = visibility or "private"
+  if safeVisibility ~= "private" and safeVisibility ~= "public" and safeVisibility ~= "unlisted" then
+    log(string.format("Warning: Invalid visibility '%s', defaulting to 'private'", safeVisibility))
+    safeVisibility = "private"
+  end
+  
   local url = getApiUrl("/albums")
   local payload = JSON.encode({
-    title = title,
+    title = safeTitle,
     description = description or "",
-    visibility = visibility or "private"
+    visibility = safeVisibility
   })
   
   log(string.format("POST %s", url))
+  log(string.format("Payload: %s", payload))
   
   local body, headers = LrHttp.post(url, payload, makeHeaders())
   
@@ -183,22 +275,39 @@ function API.createAlbum(title, description, visibility)
     return nil, "No response from server. Please check your internet connection."
   end
   
+  log(string.format("Response body: %s", body))
+  if headers then
+    for _, header in ipairs(headers) do
+      log(string.format("Header: %s = %s", header.field or "unknown", header.value or ""))
+    end
+  end
+  
   local result, err = handleResponse(body, headers)
   
   if err then
-    log(string.format("Error: %s", err))
+    log(string.format("Error from handleResponse: %s", err))
     return nil, err
   end
   
   if result and result.album then
-    log(string.format("Album created: %s", result.album.id))
+    log(string.format("Album created successfully: %s (ID: %s)", result.album.title or title, result.album.id))
     return result.album, nil
   elseif result and result.error then
-    log(string.format("API error: %s", result.error))
-    return nil, result.error .. (result.message and (": " .. result.message) or "")
+    -- This shouldn't happen since handleResponse should catch this, but just in case
+    log(string.format("API error in result: %s", result.error))
+    local errorMsg = result.error
+    if result.message and result.message ~= "" then
+      errorMsg = errorMsg .. ": " .. result.message
+    end
+    return nil, errorMsg
   else
-    log("Unknown response format")
-    return nil, "Unexpected response from server"
+    log("Unknown response format - no album or error in response")
+    
+    if result and result.message then
+      return nil, "Failed to create album: " .. tostring(result.message)
+    end
+    
+    return nil, "Unexpected response from server. Please try again or contact 35px support."
   end
 end
 
@@ -283,10 +392,10 @@ function API.uploadPhoto(albumId, filePath, caption, progressCallback)
   end
 end
 
-function API.deletePhoto(albumId, photoId)
-  log(string.format("Deleting photo %s from album %s", photoId, albumId))
+function API.deletePhoto(photoId)
+  log(string.format("Deleting photo: %s", photoId))
   
-  local url = getApiUrl("/albums/" .. albumId .. "/photos/" .. photoId)
+  local url = getApiUrl("/photos/" .. photoId)
   
   -- LrHttp doesn't have a delete method, so we use post with method override
   local headers = makeHeaders()

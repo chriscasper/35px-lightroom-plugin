@@ -359,15 +359,33 @@ Updates a photo's caption or sort order.
 }
 ```
 
-#### Delete Photo
+#### Delete Photo from Album
 
 ```
 DELETE /albums/{albumId}/photos/{photoId}
 ```
 
-Removes a photo from an album.
+Removes a photo from a specific album.
 
 **Required Scope:** `photos:write`
+
+#### Delete Photo
+
+```
+DELETE /photos/{photoId}
+```
+
+Deletes a photo by its ID without requiring the album ID. This will remove the photo from all albums and delete the underlying image if it's no longer referenced.
+
+**Required Scope:** `photos:write`
+
+**Response:** `200 OK`
+```json
+{
+  "success": true,
+  "message": "Photo deleted successfully"
+}
+```
 
 ---
 
